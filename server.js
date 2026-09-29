@@ -144,7 +144,7 @@ app.get("/track", async (req, res) => {
 
 // 조회 화면(엑셀 업로드 도구 / 빠른 조회 페이지)을 이 서버가 직접 서빙
 // → 화면과 API가 같은 출처(origin)가 되어 브라우저 fetch 제한 문제가 생기지 않음
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(__dirname));
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
