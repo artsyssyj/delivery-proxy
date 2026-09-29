@@ -7,6 +7,11 @@
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
@@ -136,6 +141,10 @@ app.get("/track", async (req, res) => {
     res.status(500).json({ error: "조회 중 오류", detail: err.message });
   }
 });
+
+// 조회 화면(엑셀 업로드 도구 / 빠른 조회 페이지)을 이 서버가 직접 서빙
+// → 화면과 API가 같은 출처(origin)가 되어 브라우저 fetch 제한 문제가 생기지 않음
+app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
