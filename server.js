@@ -11,6 +11,15 @@ import fetch from "node-fetch";
 const app = express();
 app.use(cors());
 
+// cors() 패키지 설정과 무관하게 항상 명시적으로 헤더를 강제 부여 (안전장치)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
+
 const PORT = process.env.PORT || 8787;
 
 // 셀프호스팅한 Delivery Tracker GraphQL 서버 주소 (예: https://your-delivery-tracker.up.railway.app/graphql)
