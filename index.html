@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>배송흐름 빠른 조회</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --muted: #64748b;
+    --accent: #0f172a;
+    --accent-fg: #ffffff;
+    --done: #059669;
+    --done-bg: #ecfdf5;
+    --transit: #b45309;
+    --transit-bg: #fffbeb;
+    --error: #e11d48;
+    --error-bg: #fff1f2;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b1220;
+      --card: #111827;
+      --border: #1f2937;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #f8fafc;
+      --accent-fg: #0f172a;
+      --done: #34d399;
+      --done-bg: #052e21;
+      --transit: #fbbf24;
+      --transit-bg: #2a1e04;
+      --error: #fb7185;
+      --error-bg: #2a0a12;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1220;
+    --card: #111827;
+    --border: #1f2937;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --accent: #f8fafc;
+    --accent-fg: #0f172a;
+    --done: #34d399;
+    --done-bg: #052e21;
+    --transit: #fbbf24;
+    --transit-bg: #2a1e04;
+    --error: #fb7185;
+    --error-bg: #2a0a12;
+  }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, Roboto, sans-serif;
+  }
+  .wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 32px 20px 40px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 4px;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  select, input {
+    width: 100%;
+    font-size: 15px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    margin-bottom: 14px;
+    box-sizing: border-box;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.5;
+  }
+  .result {
+    margin-top: 18px;
+    display: none;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    margin-bottom: 10px;
+  }
+  .badge.done { background: var(--done-bg); color: var(--done); }
+  .badge.transit { background: var(--transit-bg); color: var(--transit); }
+  .badge.error { background: var(--error-bg); color: var(--error); }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .row:last-child { border-bottom: none; }
+  .row span:first-child { color: var(--muted); }
+  .row span:last-child { text-align: right; max-width: 60%; }
+  .hint {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 14px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>배송흐름 빠른 조회</h1>
+  <p class="sub">택배사와 운송장번호로 마지막 배송 상태를 확인해요</p>
+
+  <div class="card">
+    <label for="carrier">택배사</label>
+    <select id="carrier">
+      <option value="04">우체국택배</option>
+      <option value="05" selected>CJ대한통운</option>
+      <option value="06">한진택배</option>
+      <option value="08">로젠택배</option>
+      <option value="11">롯데택배</option>
+      <option value="24">GS 편의점택배</option>
+    </select>
+
+    <label for="invoice">운송장번호</label>
+    <input id="invoice" type="text" inputmode="numeric" placeholder="예: 600540757582" />
+
+    <button id="go">조회하기</button>
+
+    <div class="result" id="result"></div>
+  </div>
+
+  <p class="hint">여러 건을 한 번에 조회하려면 <a href="/excel.html" style="color:inherit;">엑셀 업로드 도구</a>를 이용하세요</p>
+</div>
+
+<script>
+  const PROXY_URL = "/track";
+
+  const btn = document.getElementById("go");
+  const resultEl = document.getElementById("result");
+
+  async function run() {
+    const carrier = document.getElementById("carrier").value;
+    const invoice = document.getElementById("invoice").value.trim();
+    if (!invoice) {
+      alert("운송장번호를 입력해주세요");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "조회 중…";
+    resultEl.style.display = "none";
+
+    try {
+      const url = `${PROXY_URL}?t_code=${encodeURIComponent(carrier)}&t_invoice=${encodeURIComponent(invoice)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`서버 오류 (HTTP ${res.status})`);
+      const data = await res.json();
+      const details = data.trackingDetails || [];
+      const last = details[details.length - 1];
+
+      let html = "";
+      if (!last) {
+        html += `<span class="badge transit">조회 결과 없음</span>`;
+        html += `<div class="row"><span>안내</span><span>아직 접수 전이거나 정보가 없어요</span></div>`;
+      } else {
+        const statusClass = data.complete ? "done" : "transit";
+        const statusText = data.complete ? "배송완료" : "배송중";
+        html += `<span class="badge ${statusClass}">${statusText}</span>`;
+        html += `<div class="row"><span>최근 상태</span><span>${last.kind || "-"}</span></div>`;
+        html += `<div class="row"><span>위치</span><span>${last.where || "-"}</span></div>`;
+        html += `<div class="row"><span>시각</span><span>${last.time || "-"}</span></div>`;
+      }
+      resultEl.innerHTML = html;
+      resultEl.style.display = "block";
+    } catch (err) {
+      resultEl.innerHTML = `<span class="badge error">조회 실패</span><div class="row"><span>사유</span><span>${err.message}</span></div>`;
+      resultEl.style.display = "block";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "조회하기";
+    }
+  }
+
+  btn.addEventListener("click", run);
+  document.getElementById("invoice").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") run();
+  });
+</script>
+</body>
+</html>
