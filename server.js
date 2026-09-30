@@ -9,6 +9,11 @@ import cors from "cors";
 import fetch from "node-fetch";
 import path from "path";
 import { fileURLToPath } from "url";
+import multer from "multer";
+import officeCrypto from "officecrypto-tool";
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const EXCEL_PASSWORD = "0000"; // 회사에서 기본으로 거는 고정 암호
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -79,6 +84,10 @@ const TRACK_QUERY = `
         description
         location { name }
       }
+      recipient {
+        name
+        phone
+      }
     }
   }
 `;
@@ -118,15 +127,18 @@ app.get("/track", async (req, res) => {
       return res.status(502).json({ error: "GraphQL 오류", detail: gqlJson.errors });
     }
 
-    const lastEvent = gqlJson.data?.track?.lastEvent;
+    const track = gqlJson.data?.track;
+    const lastEvent = track?.lastEvent;
+    const recipient = track?.recipient;
+
     if (!lastEvent) {
-      return res.json({ complete: false, trackingDetails: [] });
+      return res.json({ complete: false, trackingDetails: [], recipientName: recipient?.name || "", recipientPhone: recipient?.phone || "" });
     }
 
     const statusCode = lastEvent.status?.code || "";
     const isComplete = /delivered|done|complete/i.test(statusCode);
 
-    // 기존 엑셀 업로드 도구가 기대하는 SweetTracker 스타일 응답으로 변환
+    // 기존 엑셀 업로드 도구가 기대하는 SweetTracker 스타일 응답으로 변환 + 수취인 정보 추가
     res.json({
       complete: isComplete,
       trackingDetails: [
@@ -136,9 +148,37 @@ app.get("/track", async (req, res) => {
           time: lastEvent.time || "",
         },
       ],
+      recipientName: recipient?.name || "",
+      recipientPhone: recipient?.phone || "",
     });
   } catch (err) {
     res.status(500).json({ error: "조회 중 오류", detail: err.message });
+  }
+});
+
+// 암호(0000)로 잠긴 엑셀을 서버에서 미리 풀어서 돌려줌 (암호 없는 파일은 그대로 통과)
+app.post("/decrypt-xlsx", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "파일이 없습니다" });
+    const buf = req.file.buffer;
+
+    let isEncrypted = false;
+    try {
+      isEncrypted = officeCrypto.isEncrypted(buf);
+    } catch {
+      isEncrypted = false;
+    }
+
+    if (!isEncrypted) {
+      res.set("Content-Type", "application/octet-stream");
+      return res.send(buf);
+    }
+
+    const decrypted = await officeCrypto.decrypt(buf, { password: EXCEL_PASSWORD });
+    res.set("Content-Type", "application/octet-stream");
+    res.send(decrypted);
+  } catch (err) {
+    res.status(500).json({ error: "엑셀 복호화 실패", detail: err.message });
   }
 });
 
