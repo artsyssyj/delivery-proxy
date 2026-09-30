@@ -112,6 +112,16 @@
         <select id="trackingCol"></select>
       </div>
     </div>
+    <div class="row2">
+      <div>
+        <label>수취인 이름 컬럼 (선택)</label>
+        <select id="nameCol"></select>
+      </div>
+      <div>
+        <label>연락처 컬럼 (선택)</label>
+        <select id="phoneCol"></select>
+      </div>
+    </div>
     <div class="hintline" id="rowCountText"></div>
   </div>
 
@@ -127,7 +137,7 @@
     <div class="table-scroll">
       <table>
         <thead>
-          <tr><th>택배사</th><th>운송장번호</th><th>상태</th><th>마지막 흐름</th><th>위치</th><th>시각</th></tr>
+          <tr><th>택배사</th><th>운송장번호</th><th>주문건수</th><th>수취인</th><th>연락처</th><th>상태</th><th>마지막 흐름</th><th>위치</th><th>시각</th></tr>
         </thead>
         <tbody id="resultsBody"></tbody>
       </table>
@@ -187,6 +197,8 @@ const parseError = document.getElementById("parseError");
 const mappingCard = document.getElementById("mappingCard");
 const carrierColSel = document.getElementById("carrierCol");
 const trackingColSel = document.getElementById("trackingCol");
+const nameColSel = document.getElementById("nameCol");
+const phoneColSel = document.getElementById("phoneCol");
 const rowCountText = document.getElementById("rowCountText");
 const runActions = document.getElementById("runActions");
 const runBtn = document.getElementById("runBtn");
@@ -208,34 +220,46 @@ dropZone.addEventListener("drop", (e) => {
   if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
 });
 
-function handleFile(file) {
+async function handleFile(file) {
   parseError.style.display = "none";
   results = [];
   resultsCard.style.display = "none";
   fileNameEl.style.display = "block";
-  fileNameEl.textContent = file.name;
+  fileNameEl.textContent = file.name + " (확인 중…)";
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const wb = XLSX.read(e.target.result, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-      if (!json.length) {
-        showParseError("엑셀에서 데이터를 찾지 못했어요. 첫 행이 헤더인지 확인해 주세요.");
-        return;
-      }
-      headers = Object.keys(json[0]);
-      rawRows = json;
-      populateColumnSelectors();
-      mappingCard.style.display = "block";
-      runActions.style.display = "flex";
-      updateRowCount();
-    } catch (err) {
-      showParseError("엑셀 파일을 읽는 중 오류가 발생했어요: " + err.message);
+  try {
+    const rawBuf = await file.arrayBuffer();
+
+    // 브라우저 라이브러리는 암호 걸린 엑셀을 못 풀기 때문에, 서버에서 미리 풀어서 받아옴
+    // (암호가 없는 파일이면 서버가 그대로 통과시켜서 돌려줌)
+    const form = new FormData();
+    form.append("file", new Blob([rawBuf]), file.name);
+    const decRes = await fetch("/decrypt-xlsx", { method: "POST", body: form });
+    if (!decRes.ok) {
+      const errJson = await decRes.json().catch(() => ({}));
+      throw new Error(errJson.detail || errJson.error || `서버 오류 (HTTP ${decRes.status})`);
     }
-  };
-  reader.readAsArrayBuffer(file);
+    const decBuf = await decRes.arrayBuffer();
+
+    const wb = XLSX.read(decBuf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+    if (!json.length) {
+      showParseError("엑셀에서 데이터를 찾지 못했어요. 첫 행이 헤더인지 확인해 주세요.");
+      fileNameEl.textContent = file.name;
+      return;
+    }
+    headers = Object.keys(json[0]);
+    rawRows = json;
+    populateColumnSelectors();
+    mappingCard.style.display = "block";
+    runActions.style.display = "flex";
+    updateRowCount();
+    fileNameEl.textContent = file.name;
+  } catch (err) {
+    showParseError("엑셀 파일을 읽는 중 오류가 발생했어요: " + err.message);
+    fileNameEl.textContent = file.name;
+  }
 }
 
 function showParseError(msg) {
@@ -243,31 +267,66 @@ function showParseError(msg) {
   parseError.style.display = "block";
 }
 
+const nameColSel = document.getElementById("nameCol");
+const phoneColSel = document.getElementById("phoneCol");
+
 function populateColumnSelectors() {
-  [carrierColSel, trackingColSel].forEach((sel) => (sel.innerHTML = '<option value="">선택</option>'));
+  [carrierColSel, trackingColSel, nameColSel, phoneColSel].forEach(
+    (sel) => (sel.innerHTML = '<option value="">선택 안 함</option>')
+  );
   headers.forEach((h) => {
-    const o1 = document.createElement("option"); o1.value = h; o1.textContent = h;
-    carrierColSel.appendChild(o1);
-    const o2 = document.createElement("option"); o2.value = h; o2.textContent = h;
-    trackingColSel.appendChild(o2);
+    [carrierColSel, trackingColSel, nameColSel, phoneColSel].forEach((sel) => {
+      const o = document.createElement("option");
+      o.value = h; o.textContent = h;
+      sel.appendChild(o);
+    });
   });
   carrierColSel.value = guessColumn(headers, ["택배", "carrier", "carr"]);
   trackingColSel.value = guessColumn(headers, ["운송장", "송장", "tracking", "invoice"]);
-  carrierColSel.addEventListener("change", updateRowCount);
-  trackingColSel.addEventListener("change", updateRowCount);
+  nameColSel.value = guessColumn(headers, ["수취인", "받는사람", "받는분", "고객명", "성명", "이름", "name"]);
+  phoneColSel.value = guessColumn(headers, ["연락처", "전화", "휴대폰", "핸드폰", "hp", "phone", "tel"]);
+  [carrierColSel, trackingColSel, nameColSel, phoneColSel].forEach((sel) =>
+    sel.addEventListener("change", updateRowCount)
+  );
 }
 
 function rowsToQuery() {
   const cCol = carrierColSel.value, tCol = trackingColSel.value;
+  const nCol = nameColSel.value, pCol = phoneColSel.value;
   if (!cCol || !tCol) return [];
-  return rawRows
-    .map((r) => ({ carrierRaw: r[cCol], trackingRaw: r[tCol] }))
+  const filtered = rawRows
+    .map((r) => ({
+      carrierRaw: r[cCol],
+      trackingRaw: r[tCol],
+      nameRaw: nCol ? r[nCol] : "",
+      phoneRaw: pCol ? r[pCol] : "",
+    }))
     .filter((r) => String(r.trackingRaw || "").trim());
+
+  // 같은 운송장번호는 하나의 건으로 묶기 (여러 상품이 한 박스로 나간 경우)
+  const map = new Map();
+  for (const r of filtered) {
+    const key = String(r.trackingRaw).trim();
+    if (!map.has(key)) {
+      map.set(key, {
+        carrierRaw: r.carrierRaw,
+        trackingRaw: key,
+        nameRaw: r.nameRaw,
+        phoneRaw: r.phoneRaw,
+        orderCount: 0,
+      });
+    }
+    map.get(key).orderCount++;
+  }
+  return Array.from(map.values());
 }
 
 function updateRowCount() {
   const q = rowsToQuery();
-  rowCountText.textContent = `총 ${rawRows.length}행 중 운송장번호가 있는 ${q.length}건을 조회합니다.`;
+  const merged = q.filter((r) => r.orderCount > 1).length;
+  let text = `총 ${rawRows.length}행 중 고유 운송장번호 ${q.length}건을 조회합니다.`;
+  if (merged > 0) text += ` (${merged}건은 같은 운송장으로 묶임)`;
+  rowCountText.textContent = text;
 }
 
 async function queryOne(carrierRaw, trackingNumber) {
@@ -296,6 +355,8 @@ async function queryOne(carrierRaw, trackingNumber) {
     lastKind: (last && (last.kind || last.description)) || "",
     lastWhere: (last && (last.where || last.location)) || "",
     lastTime: (last && (last.time || last.timeString)) || "",
+    recipientName: data.recipientName || "",
+    recipientPhone: data.recipientPhone || "",
   };
 }
 
@@ -312,6 +373,9 @@ function renderResults() {
     return `<tr>
       <td>${escapeHtml(r.carrierRaw)}</td>
       <td class="mono">${escapeHtml(r.trackingRaw)}</td>
+      <td class="muted">${r.orderCount > 1 ? r.orderCount + "건 묶음" : "-"}</td>
+      <td>${escapeHtml(r.recipientName || "-")}</td>
+      <td class="mono">${escapeHtml(r.recipientPhone || "-")}</td>
       <td><span class="badge ${badgeClass}">${badgeText}</span></td>
       <td>${escapeHtml(r.lastKind || r.message || "-")}</td>
       <td class="muted">${escapeHtml(r.lastWhere || "-")}</td>
@@ -336,9 +400,12 @@ runBtn.addEventListener("click", async () => {
 
   for (let i = 0; i < queue.length; i++) {
     if (cancelFlag) break;
-    const { carrierRaw, trackingRaw } = queue[i];
+    const { carrierRaw, trackingRaw, nameRaw, phoneRaw, orderCount } = queue[i];
     const r = await queryOne(carrierRaw, trackingRaw);
-    results.push({ carrierRaw, trackingRaw, ...r });
+    // 엑셀에 수취인 컬럼을 지정했으면 그 값을 우선 사용, 없으면 조회 API가 준 값 사용
+    if (nameRaw) r.recipientName = nameRaw;
+    if (phoneRaw) r.recipientPhone = phoneRaw;
+    results.push({ carrierRaw, trackingRaw, orderCount, ...r });
     progressText.textContent = `${i + 1} / ${queue.length} 조회 중…`;
     renderResults();
     await new Promise((res) => setTimeout(res, 250));
@@ -356,6 +423,9 @@ downloadBtn.addEventListener("click", () => {
   const sheetData = results.map((r) => ({
     택배사: r.carrierRaw,
     운송장번호: r.trackingRaw,
+    묶인주문건수: r.orderCount || 1,
+    수취인: r.recipientName || "",
+    연락처: r.recipientPhone || "",
     완료여부: r.status === "done" ? (r.complete ? "배송완료" : "배송중") : "조회실패",
     최종상태: r.lastKind || r.message || "",
     최종위치: r.lastWhere || "",
