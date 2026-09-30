@@ -267,9 +267,6 @@ function showParseError(msg) {
   parseError.style.display = "block";
 }
 
-const nameColSel = document.getElementById("nameCol");
-const phoneColSel = document.getElementById("phoneCol");
-
 function populateColumnSelectors() {
   [carrierColSel, trackingColSel, nameColSel, phoneColSel].forEach(
     (sel) => (sel.innerHTML = '<option value="">선택 안 함</option>')
