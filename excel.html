@@ -340,7 +340,14 @@ async function queryOne(carrierRaw, trackingNumber) {
   } catch (err) {
     return { status: "error", message: `${err.message} — 호출한 주소: ${url}` };
   }
-  if (!res.ok) return { status: "error", message: `HTTP ${res.status} — 호출한 주소: ${url}` };
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const errBody = await res.json();
+      detail = errBody.detail ? ` — ${JSON.stringify(errBody.detail)}` : (errBody.error ? ` — ${errBody.error}` : "");
+    } catch {}
+    return { status: "error", message: `HTTP ${res.status}${detail} — 호출한 주소: ${url}` };
+  }
 
   const data = await res.json();
   const details = data.trackingDetails || (data.data && data.data.trackingDetails) || [];
