@@ -75,7 +75,7 @@ async function getAccessToken() {
   return cachedToken;
 }
 
-const TRACK_QUERY = `
+const TRACK_QUERY_WITH_RECIPIENT = `
   query GetTrackLastEvent($carrierId: ID!, $trackingNumber: String!) {
     track(carrierId: $carrierId, trackingNumber: $trackingNumber) {
       lastEvent {
@@ -91,6 +91,52 @@ const TRACK_QUERY = `
     }
   }
 `;
+
+// recipient 필드가 스키마에 없는 서버일 경우를 대비한 안전한 버전 (수취인 정보 없이)
+const TRACK_QUERY_BASIC = `
+  query GetTrackLastEvent($carrierId: ID!, $trackingNumber: String!) {
+    track(carrierId: $carrierId, trackingNumber: $trackingNumber) {
+      lastEvent {
+        time
+        status { code name }
+        description
+        location { name }
+      }
+    }
+  }
+`;
+
+let recipientFieldSupported = true; // 한 번 실패하면 false로 바뀌어 이후 요청은 바로 BASIC 쿼리만 사용
+
+async function runTrackQuery(headers, carrierId, trackingNumber) {
+  if (recipientFieldSupported) {
+    const res = await fetch(DELIVERY_TRACKER_ENDPOINT, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        query: TRACK_QUERY_WITH_RECIPIENT,
+        variables: { carrierId, trackingNumber },
+      }),
+    });
+    const json = await res.json();
+    if (!json.errors) return json;
+
+    // recipient 관련 필드 에러면 이후부턴 BASIC 쿼리로 전환
+    const msg = JSON.stringify(json.errors);
+    console.warn("[recipient 필드 조회 실패, BASIC 쿼리로 전환]", msg);
+    recipientFieldSupported = false;
+  }
+
+  const res2 = await fetch(DELIVERY_TRACKER_ENDPOINT, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      query: TRACK_QUERY_BASIC,
+      variables: { carrierId, trackingNumber },
+    }),
+  });
+  return res2.json();
+}
 
 app.get("/track", async (req, res) => {
   const { t_code, t_invoice } = req.query;
@@ -112,16 +158,7 @@ app.get("/track", async (req, res) => {
     const token = await getAccessToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const gqlRes = await fetch(DELIVERY_TRACKER_ENDPOINT, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        query: TRACK_QUERY,
-        variables: { carrierId, trackingNumber: String(t_invoice) },
-      }),
-    });
-
-    const gqlJson = await gqlRes.json();
+    const gqlJson = await runTrackQuery(headers, carrierId, String(t_invoice));
 
     if (gqlJson.errors) {
       return res.status(502).json({ error: "GraphQL 오류", detail: gqlJson.errors });
